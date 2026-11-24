@@ -1,0 +1,50 @@
+{
+  "num_coins": 150,
+  "min_quote_volume_usdt": 500000,
+  "timeframe": "5m",
+  "long_timeframe": "15m",
+  "very_long_timeframe": "1h",
+  "use_htf_filter": true,
+  "use_very_long_filter": true,
+  "use_ema200": true,
+  "candle_limit": 260,
+  "crossover_lookback": 3,
+  "volume_period": 20,
+  "volume_multiplier": 2.0,
+  "use_z_score": false,
+  "min_z_score": 1.5,
+  "enable_ema_vwap_vol": true,
+  "enable_momentum": false,
+  "use_closed_candles_only": true,
+  "max_workers": 6,
+  "scan_interval_sec": 25,
+  "signal_cooldown_min": 15,
+  "excluded_stables": [
+    "USDT", "USDC", "USD1", "BUSD", "DAI", "TUSD",
+    "FDUSD", "USDE", "USDP", "EUR", "AEUR", "PYUSD"
+  ],
+  "trading": {
+    "mode": "paper",
+    "auto_trade": true,
+    "trade_amount_usdt": 25.0,
+    "max_open_trades": 3,
+    "paper_balance_usdt": 1000.0,
+    "take_profit_pct": 1.5,
+    "stop_loss_pct": 1.0,
+    "trailing_stop_enabled": true,
+    "trailing_activation_pct": 0.8,
+    "trailing_distance_pct": 0.4,
+    "fee_pct": 0.1,
+    "monitor_interval_sec": 5
+  },
+  "gateio_api": {
+    "api_key": "",
+    "api_secret": ""
+  },
+  "telegram": {
+    "enabled": false,
+    "bot_token": "",
+    "chat_id": ""
+  },
+  "log_csv": true
+}
