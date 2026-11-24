@@ -8,7 +8,7 @@ source.exclude_dirs = tests,bin,.buildozer,.github,__pycache__
 version = 1.0.0
 
 # Pure-Python dependencies only for fast, reliable Android APK builds
-requirements = python3,kivy==2.3.0,requests,urllib3,certifi,idna,charset-normalizer
+requirements = python3,kivy,requests,urllib3,certifi,idna,charset-normalizer
 
 orientation = portrait
 fullscreen = 0
