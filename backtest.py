@@ -54,7 +54,7 @@ def fetch_history(
     candles_by_ts: Dict[int, Dict[str, Any]] = {}
 
     while cursor < end_ts:
-        chunk_end = min(end_ts, cursor + step * 999)
+        chunk_end = min(end_ts, cursor + step * 800)
         params = {
             "currency_pair": pair,
             "interval": interval,
@@ -67,7 +67,11 @@ def fetch_history(
             if response.status_code == 429 or response.status_code >= 500:
                 time.sleep(min(2 ** attempt, 12))
                 continue
-            response.raise_for_status()
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Gate.io candle API {response.status_code} for {pair}/{interval}: "
+                    f"{response.text[:500]}"
+                )
             break
         else:
             raise RuntimeError(f"Gate.io API retry limit reached for {pair} {interval}")
@@ -230,7 +234,8 @@ def simulate_pair(
             continue
 
         window = base[max(0, i - int(settings["candle_limit"]) + 1):i + 1]
-        signal = evaluate_ema_vwap_vol(window, settings) if settings.get("enable_ema_vwap_vol", True) else {"signal": False}
+        vwap_window = medium[max(0, mi - 300):mi]
+        signal = evaluate_ema_vwap_vol(window, settings, vwap_candles=vwap_window) if settings.get("enable_ema_vwap_vol", True) else {"signal": False}
         if settings.get("enable_momentum", False):
             momentum = evaluate_momentum(window, settings)
             if not (signal.get("signal") and momentum.get("signal")):
@@ -303,7 +308,7 @@ def simulate_pair(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Gate.io real-candle 1m scalp backtest")
-    parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--days", type=int, default=26)
     parser.add_argument("--pairs", default="BTC_USDT,ETH_USDT,SOL_USDT,XRP_USDT")
     parser.add_argument("--fee-pct", type=float, default=0.10, help="Taker fee on each side, percent")
     parser.add_argument("--slippage-bps", type=float, default=5.0, help="Adverse slippage on each side in basis points")
@@ -328,6 +333,7 @@ def main() -> int:
     now = int(time.time())
     period_start = now - args.days * 86400
     # Three extra days provide at least 200 completed 15m bars for warm-up.
+    # Keep three days of warm-up while staying inside a recent 29-day window.
     fetch_start = period_start - 3 * 86400
     test_start = period_start + int(args.days * 86400 * 0.70)
     settings = deepcopy(DEFAULT_SETTINGS)
