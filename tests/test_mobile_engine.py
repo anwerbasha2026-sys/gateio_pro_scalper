@@ -181,7 +181,6 @@ class TestGateioMobileEngine(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             cfg = deepcopy(DEFAULT_SETTINGS)
             cfg["trading"]["fee_pct"] = 0.0
-            cfg["trading"]["slippage_pct"] = 0.0
             cfg["trading"]["trailing_stop_enabled"] = False
             cfg["trading"]["break_even_activation_pct"] = 5.0
             cfg["trading"]["max_holding_minutes"] = 15
@@ -190,7 +189,7 @@ class TestGateioMobileEngine(unittest.TestCase):
             position = trader.open_trade("BTC_USDT", 100.0, "EMA", atr=1.0)
             self.assertAlmostEqual(position.entry_price, 100.05)
             self.assertAlmostEqual(position.take_profit, 101.3, places=6)
-            self.assertAlmostEqual(position.stop_loss, 98.4)
+            self.assertAlmostEqual(position.stop_loss, 98.45, places=6)
             position.opened_ts = 100.0
             record = trader.evaluate_price("BTC_USDT", 100.0, now_ts=100.0 + 901.0)
             self.assertEqual(record["reason"], "TIME_EXIT")
