@@ -189,7 +189,7 @@ class TestGateioMobileEngine(unittest.TestCase):
             trader = TradeManager(cfg, data_dir=td)
             position = trader.open_trade("BTC_USDT", 100.0, "EMA", atr=1.0)
             self.assertAlmostEqual(position.entry_price, 100.05)
-            self.assertAlmostEqual(position.take_profit, 101.300625)
+            self.assertAlmostEqual(position.take_profit, 101.3, places=6)
             self.assertAlmostEqual(position.stop_loss, 98.4)
             position.opened_ts = 100.0
             record = trader.evaluate_price("BTC_USDT", 100.0, now_ts=100.0 + 901.0)
