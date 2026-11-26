@@ -2,7 +2,7 @@
 """Historical, no-lookahead Gate.io Spot backtest for the 1m scalp strategy.
 
 Example:
-  python backtest.py --days 30 --pairs BTC_USDT,ETH_USDT,SOL_USDT,XRP_USDT
+  python backtest.py --days 26 --pairs BTC_USDT,ETH_USDT,SOL_USDT,XRP_USDT
 All entries are filled at the next candle open. Taker fees and adverse slippage
 are charged on both sides. If a candle touches stop and target, stop is assumed
 first (conservative). Each symbol is simulated independently.
@@ -89,7 +89,7 @@ def fetch_history(
                 continue
             candles_by_ts[stamp] = candle
 
-        cursor = chunk_end + 1
+        cursor = chunk_end + step
         time.sleep(0.08)
 
     return [candles_by_ts[stamp] for stamp in sorted(candles_by_ts)]
@@ -237,7 +237,7 @@ def simulate_pair(
         vwap_window = medium[max(0, mi - 300):mi]
         signal = evaluate_ema_vwap_vol(window, settings, vwap_candles=vwap_window) if settings.get("enable_ema_vwap_vol", True) else {"signal": False}
         if settings.get("enable_momentum", False):
-            momentum = evaluate_momentum(window, settings)
+            momentum = evaluate_momentum(window, settings, vwap_candles=vwap_window)
             if not (signal.get("signal") and momentum.get("signal")):
                 continue
         elif not signal.get("signal"):
