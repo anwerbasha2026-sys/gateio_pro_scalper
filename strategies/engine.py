@@ -14,6 +14,7 @@ from indicators.pure_ta import (
 def evaluate_ema_vwap_vol(
     candles: List[Dict[str, float]],
     settings: Dict[str, Any],
+    vwap_candles: Optional[List[Dict[str, float]]] = None,
 ) -> Dict[str, Any]:
     """Conservative 1m long-only entry: fresh cross, trend, VWAP, volume and candle quality."""
     closed_only = bool(settings.get("use_closed_candles_only", True))
@@ -36,7 +37,10 @@ def evaluate_ema_vwap_vol(
     closes = [float(c["close"]) for c in candles]
     rsi_series = calculate_rsi(closes, 14)
     atr_series = calculate_atr(candles, 14)
-    vwap_value = calculate_daily_vwap(candles, closed_only=closed_only)
+    # Prefer a 5m session window (300 bars ~= 25h) for a true UTC-day VWAP;
+    # fall back to the entry series for standalone/test use.
+    vwap_source = vwap_candles if vwap_candles else candles
+    vwap_value = calculate_daily_vwap(vwap_source, closed_only=closed_only)
     volume = analyze_volume(
         candles,
         period=vol_period,
@@ -185,7 +189,16 @@ def scan_symbol(api: Any, pair: str, settings: Dict[str, Any]) -> Optional[Dict[
     if not (enable_evv or enable_momentum):
         return None
 
-    evv = evaluate_ema_vwap_vol(candles, settings) if enable_evv else {"signal": False}
+    closed_only = bool(settings.get("use_closed_candles_only", True))
+    # Fetch enough 5m bars to include the full current UTC session for VWAP.
+    medium = None
+    if settings.get("use_htf_filter", True) and settings.get("long_timeframe") == "5m":
+        medium = api.fetch_candles(pair, interval="5m", limit=300)
+    vwap_candles = medium or api.fetch_candles(pair, interval="5m", limit=300)
+    if settings.get("use_htf_filter", True) and medium is None:
+        medium = api.fetch_candles(pair, interval=settings["long_timeframe"], limit=300)
+
+    evv = evaluate_ema_vwap_vol(candles, settings, vwap_candles=vwap_candles) if enable_evv else {"signal": False}
     momentum = evaluate_momentum(candles, settings) if enable_momentum else {"signal": False}
     strategies = []
 
@@ -202,11 +215,9 @@ def scan_symbol(api: Any, pair: str, settings: Dict[str, Any]) -> Optional[Dict[
             return None
         strategies = ["MOMENTUM"]
 
-    closed_only = bool(settings.get("use_closed_candles_only", True))
     htf_medium_ok = True
     htf_long_ok = True
     if settings.get("use_htf_filter", True):
-        medium = api.fetch_candles(pair, interval=settings["long_timeframe"], limit=220)
         htf_medium_ok = check_htf_15m_trend(medium, closed_only=closed_only)
         if not htf_medium_ok:
             return None
