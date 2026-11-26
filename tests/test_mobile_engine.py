@@ -117,6 +117,8 @@ class TestGateioMobileEngine(unittest.TestCase):
 
     def test_volume_uses_current_closed_candle(self):
         candles = make_candles(40, volume=1000.0)
+        for index, candle in enumerate(candles[:-1]):
+            candle["volume"] = 1000.0 + (index % 5) * 20.0
         candles[-1]["volume"] = 5000.0
         result = analyze_volume(
             candles, period=20, multiplier=2.0, min_z_score=1.0,
