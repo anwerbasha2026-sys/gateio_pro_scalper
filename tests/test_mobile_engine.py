@@ -165,6 +165,7 @@ class TestGateioMobileEngine(unittest.TestCase):
                 "trailing_distance_pct": 0.5,
                 "break_even_activation_pct": 5.0,
                 "fee_pct": 0.0,
+                "slippage_pct": 0.0,
             })
             trader = TradeManager(cfg, data_dir=td)
             self.assertIsNotNone(trader.open_trade("BTC_USDT", 100.0, "EMA_VWAP_VOL"))
