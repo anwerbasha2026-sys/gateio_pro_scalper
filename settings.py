@@ -7,9 +7,9 @@ from typing import Any, Dict, Optional
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "num_coins": 150,
     "min_quote_volume_usdt": 500000,
-    "timeframe": "1m",
-    "long_timeframe": "5m",
-    "very_long_timeframe": "15m",
+    "timeframe": "5m",
+    "long_timeframe": "15m",
+    "very_long_timeframe": "1h",
     "use_htf_filter": True,
     "use_very_long_filter": True,
     "use_ema200": True,
