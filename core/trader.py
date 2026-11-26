@@ -117,12 +117,13 @@ class TradeManager:
         stop_pct = float(self.cfg.get("stop_loss_pct", 0.55))
         if bool(self.cfg.get("use_atr_exits", True)) and atr and atr > 0 and entry > 0:
             atr_pct = atr / entry * 100.0
+            # UI TP/SL values remain effective floors; ATR expands levels when volatility requires it.
             stop_pct = max(
-                float(self.cfg.get("min_stop_loss_pct", 0.45)),
+                stop_pct,
                 atr_pct * float(self.cfg.get("atr_stop_multiplier", 1.6)),
             )
             target_pct = max(
-                float(self.cfg.get("min_take_profit_pct", 0.65)),
+                target_pct,
                 atr_pct * float(self.cfg.get("atr_target_multiplier", 1.25)),
             )
         return min(stop_pct, 3.0), min(target_pct, 3.0)
