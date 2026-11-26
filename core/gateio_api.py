@@ -144,15 +144,29 @@ class GateioSpotAPI:
                 continue
             try:
                 quote_volume = float(row[1]) if len(row) > 1 and row[1] not in (None, "") else 0.0
-                base_volume = float(row[6]) if len(row) > 6 and row[6] not in (None, "") else 0.0
-                closed_value = str(row[7]).lower() if len(row) > 7 else ""
+                base_volume = 0.0
+                closed_value = ""
+
+                # Gate.io responses have appeared with both 7 and 8 columns:
+                # 7 cols may place window_closed at index 6; 8 cols place
+                # base volume at index 6 and window_closed at index 7.
+                if len(row) > 7:
+                    base_volume = float(row[6]) if row[6] not in (None, "") else 0.0
+                    closed_value = str(row[7]).lower()
+                elif len(row) > 6:
+                    column_six = str(row[6]).lower()
+                    if column_six in ("true", "false"):
+                        closed_value = column_six
+                    else:
+                        base_volume = float(row[6]) if row[6] not in (None, "") else 0.0
+
                 candle = {
                     "ts": int(float(row[0])),
                     "open": float(row[5]),
                     "high": float(row[3]),
                     "low": float(row[4]),
                     "close": float(row[2]),
-                    # Quote turnover is the more comparable volume measure for USDT pairs.
+                    # Gate's second column is quote-currency turnover.
                     "volume": quote_volume if quote_volume > 0 else base_volume,
                     "quote_volume": quote_volume,
                     "base_volume": base_volume,
