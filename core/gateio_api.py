@@ -143,17 +143,23 @@ class GateioSpotAPI:
             if len(row) < 6:
                 continue
             try:
-                vol = float(row[6]) if len(row) > 6 and row[6] not in (None, "") else float(row[1])
-                candles.append(
-                    {
-                        "ts": int(float(row[0])),
-                        "open": float(row[5]),
-                        "high": float(row[3]),
-                        "low": float(row[4]),
-                        "close": float(row[2]),
-                        "volume": vol,
-                    }
-                )
+                quote_volume = float(row[1]) if len(row) > 1 and row[1] not in (None, "") else 0.0
+                base_volume = float(row[6]) if len(row) > 6 and row[6] not in (None, "") else 0.0
+                closed_value = str(row[7]).lower() if len(row) > 7 else ""
+                candle = {
+                    "ts": int(float(row[0])),
+                    "open": float(row[5]),
+                    "high": float(row[3]),
+                    "low": float(row[4]),
+                    "close": float(row[2]),
+                    # Quote turnover is the more comparable volume measure for USDT pairs.
+                    "volume": quote_volume if quote_volume > 0 else base_volume,
+                    "quote_volume": quote_volume,
+                    "base_volume": base_volume,
+                }
+                if closed_value in ("true", "false"):
+                    candle["window_closed"] = closed_value == "true"
+                candles.append(candle)
             except (TypeError, ValueError):
                 continue
         candles.sort(key=lambda c: c["ts"])
@@ -199,14 +205,19 @@ class GateioSpotAPI:
             "time_in_force": "ioc",
         }
         res = self._request("POST", "/spot/orders", body=body, signed=True)
-        filled_total = float(res.get("filled_total") or usdt_amount)
-        avg_price = float(res.get("avg_deal_price") or self.fetch_last_price(pair) or 0.0)
-        filled_qty = float(res.get("filled_amount") or (filled_total / avg_price if avg_price > 0 else 0.0))
+        filled_total = float(res.get("filled_total") or 0.0)
+        filled_qty = float(res.get("filled_amount") or 0.0)
+        avg_price = float(res.get("avg_deal_price") or 0.0)
+        if avg_price <= 0 and filled_total > 0 and filled_qty > 0:
+            avg_price = filled_total / filled_qty
         return {
             "order_id": str(res.get("id", "")),
             "filled_qty": filled_qty,
             "avg_price": avg_price,
             "cost": filled_total,
+            "fee": float(res.get("fee") or 0.0),
+            "fee_currency": str(res.get("fee_currency") or ""),
+            "finish_as": str(res.get("finish_as") or ""),
         }
 
     def place_market_sell(self, pair: str, qty: float) -> Dict[str, Any]:
@@ -223,12 +234,17 @@ class GateioSpotAPI:
             "time_in_force": "ioc",
         }
         res = self._request("POST", "/spot/orders", body=body, signed=True)
-        avg_price = float(res.get("avg_deal_price") or self.fetch_last_price(pair) or 0.0)
-        filled_qty = float(res.get("filled_amount") or qty)
-        filled_total = float(res.get("filled_total") or (filled_qty * avg_price))
+        avg_price = float(res.get("avg_deal_price") or 0.0)
+        filled_qty = float(res.get("filled_amount") or 0.0)
+        filled_total = float(res.get("filled_total") or 0.0)
+        if avg_price <= 0 and filled_total > 0 and filled_qty > 0:
+            avg_price = filled_total / filled_qty
         return {
             "order_id": str(res.get("id", "")),
             "filled_qty": filled_qty,
             "avg_price": avg_price,
             "cost": filled_total,
+            "fee": float(res.get("fee") or 0.0),
+            "fee_currency": str(res.get("fee_currency") or ""),
+            "finish_as": str(res.get("finish_as") or ""),
         }
