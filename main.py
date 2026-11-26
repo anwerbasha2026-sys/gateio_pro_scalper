@@ -215,6 +215,12 @@ class GateioScalperMobileApp(App):
         self.in_interval = make_input(s["scan_interval_sec"])
         self.in_workers = make_input(s["max_workers"])
         self.in_cooldown = make_input(s["signal_cooldown_min"])
+        self.in_rsi_min = make_input(s.get("rsi_min", 52.0))
+        self.in_rsi_max = make_input(s.get("rsi_max", 68.0))
+        self.in_close_location = make_input(s.get("min_candle_close_location", 0.65))
+        self.in_max_extension = make_input(s.get("max_ema_extension_atr", 0.8))
+        self.in_min_atr_pct = make_input(s.get("min_atr_pct", 0.03))
+        self.in_max_atr_pct = make_input(s.get("max_atr_pct", 1.5))
 
         rows = [
             ("EMA + Daily VWAP + Vol", self.sw_evv),
@@ -236,6 +242,12 @@ class GateioScalperMobileApp(App):
             ("Scan Interval (sec)", self.in_interval),
             ("Parallel Workers", self.in_workers),
             ("Alert Cooldown (min)", self.in_cooldown),
+            ("RSI Minimum", self.in_rsi_min),
+            ("RSI Maximum", self.in_rsi_max),
+            ("Minimum Candle Close Location (0-1)", self.in_close_location),
+            ("Maximum EMA9 Extension (ATR)", self.in_max_extension),
+            ("Minimum ATR (%)", self.in_min_atr_pct),
+            ("Maximum ATR (%)", self.in_max_atr_pct),
         ]
         for lbl, w in rows:
             form.add_widget(make_row(lbl, w))
@@ -262,6 +274,12 @@ class GateioScalperMobileApp(App):
         self.in_trail_act = make_input(t["trailing_activation_pct"])
         self.in_trail_dist = make_input(t["trailing_distance_pct"])
         self.in_fee = make_input(t["fee_pct"])
+        self.in_slippage = make_input(t.get("slippage_pct", 0.05))
+        self.sw_atr_exits = Switch(active=bool(t.get("use_atr_exits", True)))
+        self.in_atr_stop_mult = make_input(t.get("atr_stop_multiplier", 1.6))
+        self.in_atr_target_mult = make_input(t.get("atr_target_multiplier", 1.25))
+        self.in_break_even = make_input(t.get("break_even_activation_pct", 0.5))
+        self.in_max_hold = make_input(t.get("max_holding_minutes", 15))
 
         for lbl, w in [
             ("Account Mode (PAPER/LIVE)", self.sp_mode),
@@ -275,6 +293,12 @@ class GateioScalperMobileApp(App):
             ("Trailing Activation (%)", self.in_trail_act),
             ("Trailing Distance (%)", self.in_trail_dist),
             ("Paper Fee (%)", self.in_fee),
+            ("Paper Slippage (%)", self.in_slippage),
+            ("ATR-Based TP / SL", self.sw_atr_exits),
+            ("ATR Stop Multiplier", self.in_atr_stop_mult),
+            ("ATR Target Multiplier", self.in_atr_target_mult),
+            ("Break-Even Activation (%)", self.in_break_even),
+            ("Maximum Holding Time (min)", self.in_max_hold),
         ]:
             form.add_widget(make_row(lbl, w))
 
@@ -371,6 +395,12 @@ class GateioScalperMobileApp(App):
             cfg["scan_interval_sec"] = max(3, int(self.in_interval.text))
             cfg["max_workers"] = max(1, min(16, int(self.in_workers.text)))
             cfg["signal_cooldown_min"] = max(0, int(self.in_cooldown.text))
+            cfg["rsi_min"] = max(1.0, min(99.0, float(self.in_rsi_min.text)))
+            cfg["rsi_max"] = max(cfg["rsi_min"] + 1.0, min(100.0, float(self.in_rsi_max.text)))
+            cfg["min_candle_close_location"] = max(0.0, min(1.0, float(self.in_close_location.text)))
+            cfg["max_ema_extension_atr"] = max(0.1, float(self.in_max_extension.text))
+            cfg["min_atr_pct"] = max(0.0, float(self.in_min_atr_pct.text))
+            cfg["max_atr_pct"] = max(cfg["min_atr_pct"], float(self.in_max_atr_pct.text))
 
             mode = self.sp_mode.text.lower()
             cfg["trading"]["mode"] = mode
@@ -384,6 +414,12 @@ class GateioScalperMobileApp(App):
             cfg["trading"]["trailing_activation_pct"] = max(0.05, float(self.in_trail_act.text))
             cfg["trading"]["trailing_distance_pct"] = max(0.05, float(self.in_trail_dist.text))
             cfg["trading"]["fee_pct"] = max(0.0, float(self.in_fee.text))
+            cfg["trading"]["slippage_pct"] = max(0.0, float(self.in_slippage.text))
+            cfg["trading"]["use_atr_exits"] = bool(self.sw_atr_exits.active)
+            cfg["trading"]["atr_stop_multiplier"] = max(0.1, float(self.in_atr_stop_mult.text))
+            cfg["trading"]["atr_target_multiplier"] = max(0.1, float(self.in_atr_target_mult.text))
+            cfg["trading"]["break_even_activation_pct"] = max(0.05, float(self.in_break_even.text))
+            cfg["trading"]["max_holding_minutes"] = max(1, int(self.in_max_hold.text))
 
             cfg["gateio_api"]["api_key"] = self.in_key.text.strip()
             cfg["gateio_api"]["api_secret"] = self.in_sec.text.strip()
