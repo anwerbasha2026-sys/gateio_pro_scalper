@@ -76,9 +76,9 @@ class TestGateioMobileEngine(unittest.TestCase):
             cfg = load_settings(td)
             self.assertEqual(cfg["trading"]["mode"], "paper")
             self.assertFalse(cfg["trading"]["live_trading_approved"])
-            self.assertEqual(cfg["timeframe"], "1m")
-            self.assertEqual(cfg["long_timeframe"], "5m")
-            self.assertEqual(cfg["very_long_timeframe"], "15m")
+            self.assertEqual(cfg["timeframe"], "5m")
+            self.assertEqual(cfg["long_timeframe"], "15m")
+            self.assertEqual(cfg["very_long_timeframe"], "1h")
             self.assertEqual(cfg["num_coins"], 150)
 
     def test_gateio_pair_filter_and_candle_parser(self):
