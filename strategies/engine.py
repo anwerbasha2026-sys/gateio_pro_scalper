@@ -16,7 +16,7 @@ def evaluate_ema_vwap_vol(
     settings: Dict[str, Any],
     vwap_candles: Optional[List[Dict[str, float]]] = None,
 ) -> Dict[str, Any]:
-    """Conservative 1m long-only entry: fresh cross, trend, VWAP, volume and candle quality."""
+    """Conservative trend-continuation entry with fresh-cross or pullback-reclaim trigger."""
     closed_only = bool(settings.get("use_closed_candles_only", True))
     use_ema200 = bool(settings.get("use_ema200", True))
     lookback = int(settings.get("crossover_lookback", 4))
@@ -31,21 +31,22 @@ def evaluate_ema_vwap_vol(
         crossover_lookback=lookback,
         closed_only=closed_only,
     )
-    if ema_res is None or ema_res["cross_idx"] is None:
+    if ema_res is None:
         return {"signal": False}
 
     closes = [float(c["close"]) for c in candles]
+    e9 = ema_series(closes, 9)
+    e21 = ema_series(closes, 21)
     rsi_series = calculate_rsi(closes, 14)
     atr_series = calculate_atr(candles, 14)
-    # Prefer a 5m session window (300 bars ~= 25h) for a true UTC-day VWAP;
-    # fall back to the entry series for standalone/test use.
+
     vwap_source = vwap_candles if vwap_candles else candles
     vwap_value = calculate_daily_vwap(vwap_source, closed_only=closed_only)
     volume = analyze_volume(
         candles,
         period=vol_period,
-        multiplier=float(settings.get("volume_multiplier", 1.5)),
-        min_z_score=float(settings.get("min_z_score", 1.0)),
+        multiplier=float(settings.get("volume_multiplier", 1.3)),
+        min_z_score=float(settings.get("min_z_score", 0.8)),
         idx=idx,
         closed_only=closed_only,
     )
@@ -62,23 +63,47 @@ def evaluate_ema_vwap_vol(
     candle_range = max(high - low, 1e-12)
     close_location = (price - low) / candle_range
     atr_pct = (atr / price * 100.0) if price > 0 else 0.0
-    ema_extension_atr = (price - ema_res["ema9"]) / atr if atr > 0 else 999.0
+    ema_extension_atr = (price - e9[idx]) / atr if atr > 0 else 999.0
 
-    rsi_min = float(settings.get("rsi_min", 52.0))
-    rsi_max = float(settings.get("rsi_max", 68.0))
-    min_close_location = float(settings.get("min_candle_close_location", 0.65))
-    max_extension = float(settings.get("max_ema_extension_atr", 0.8))
+    rsi_min = float(settings.get("rsi_min", 50.0))
+    rsi_max = float(settings.get("rsi_max", 70.0))
+    min_close_location = float(settings.get("min_candle_close_location", 0.60))
+    max_extension = float(settings.get("max_ema_extension_atr", 1.2))
     min_atr_pct = float(settings.get("min_atr_pct", 0.03))
     max_atr_pct = float(settings.get("max_atr_pct", 1.5))
 
+    fresh_cross = (
+        ema_res["cross_age"] is not None
+        and ema_res["cross_age"] <= lookback
+    )
+
+    # Continuation alternative: price pulled back toward EMA9 in one of the
+    # last 3 completed candles, held above EMA21, and has now reclaimed EMA9.
+    pullback_reclaim = False
+    pullback_start = max(1, idx - int(settings.get("pullback_lookback_bars", 3)))
+    for j in range(pullback_start, idx):
+        prior_atr = float(atr_series[j])
+        if prior_atr <= 0:
+            continue
+        pulled_back = float(candles[j]["low"]) <= e9[j] + (
+            prior_atr * float(settings.get("pullback_ema_tolerance_atr", 0.20))
+        )
+        held_trend = float(candles[j]["close"]) >= e21[j]
+        if pulled_back and held_trend:
+            pullback_reclaim = True
+            break
+
     checks = {
-        "fresh_bull_cross": ema_res["cross_age"] <= lookback,
-        "ema_alignment": ema_res["ema9"] > ema_res["ema21"] and price > ema_res["ema9"],
+        "entry_trigger": bool(fresh_cross or (pullback_reclaim and price > e9[idx])),
+        "ema_alignment": e9[idx] > e21[idx] and price > e9[idx],
         "ema_slope": ema_res["ema21_rising"],
-        "ema200": (price > ema_res["ema200"] and ema_res["ema200_rising"]) if use_ema200 else True,
+        "ema200": (
+            price > ema_res["ema200"] and ema_res["ema200_rising"]
+        ) if use_ema200 else True,
         "above_vwap": price > vwap_value,
-        "volume_surge": volume["is_surge"],
-        "volume_zscore": volume["is_z_surge"] if settings.get("use_z_score", True) else True,
+        # Volume surge OR statistical Z-score is enough; requiring both
+        # duplicated almost the same volume constraint and starved signals.
+        "volume_confirmation": bool(volume["is_surge"] or volume["is_z_surge"]),
         "rsi_band": rsi_min <= rsi_value <= rsi_max,
         "bullish_candle": price > open_price and close_location >= min_close_location,
         "not_overextended": 0.0 <= ema_extension_atr <= max_extension,
@@ -91,6 +116,7 @@ def evaluate_ema_vwap_vol(
         "signal": bool(required),
         "score": score,
         "checks": checks,
+        "entry_trigger": "FRESH_CROSS" if fresh_cross else ("PULLBACK_RECLAIM" if pullback_reclaim else "NONE"),
         "price": price,
         "atr": atr,
         "atr_pct": atr_pct,
@@ -102,7 +128,6 @@ def evaluate_ema_vwap_vol(
         "rsi": rsi_value,
         "close_location": close_location,
     }
-
 
 def evaluate_momentum(
     candles: List[Dict[str, float]],
@@ -140,8 +165,7 @@ def evaluate_momentum(
         and e21[idx] > e21[max(0, idx - 3)]
         and price > e9[idx]
         and price > vwap_value
-        and volume["is_surge"]
-        and volume["is_z_surge"]
+        and (volume["is_surge"] or volume["is_z_surge"])
         and float(settings.get("rsi_min", 52.0)) <= rsi_value <= float(settings.get("rsi_max", 68.0))
         and price > float(candles[idx]["open"])
         and close_location >= float(settings.get("min_candle_close_location", 0.65))
