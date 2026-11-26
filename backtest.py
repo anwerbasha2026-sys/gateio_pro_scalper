@@ -30,7 +30,7 @@ from strategies.engine import (
 )
 
 BASE_URL = "https://api.gateio.ws/api/v4"
-INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900}
+INTERVAL_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600}
 
 
 def utc_text(ts: int) -> str:
@@ -136,11 +136,13 @@ def simulate_pair(
     settings: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Run the same closed-candle entry and ATR/time-exit rules without lookahead."""
+    base_step = INTERVAL_SECONDS[settings["timeframe"]]
     if len(base) < 250:
-        raise RuntimeError(f"Insufficient 1m candles for {pair}: {len(base)}")
+        raise RuntimeError("Insufficient entry candles for {0}: {1}".format(settings["timeframe"], len(base)))
     fee = fee_pct / 100.0
     slip = slippage_bps / 10000.0
-    max_hold = max(1, int(settings["trading"].get("max_holding_minutes", 15)))
+    max_hold_minutes = max(1.0, float(settings["trading"].get("max_holding_minutes", 15)))
+    max_hold_bars = max(1, math.ceil(max_hold_minutes * 60.0 / base_step))
     medium_step = INTERVAL_SECONDS[settings["long_timeframe"]]
     long_step = INTERVAL_SECONDS[settings["very_long_timeframe"]]
     medium_close_times = [int(c["ts"]) + medium_step for c in medium]
@@ -152,7 +154,7 @@ def simulate_pair(
 
     for i in range(warmup, len(base) - 1):
         candle = base[i]
-        candle_close_ts = int(candle["ts"]) + 60
+        candle_close_ts = int(candle["ts"]) + base_step
 
         if position is not None:
             stop = float(position["stop"])
@@ -173,7 +175,7 @@ def simulate_pair(
                 reason = "TP"
 
             if exit_price is None:
-                # New high-water stop applies from the next 1m candle onward.
+                # New high-water stop applies from the next entry-timeframe candle onward.
                 position["highest"] = max(float(position["highest"]), high)
                 gain_pct = (position["highest"] / position["entry"] - 1.0) * 100.0
                 trade_cfg = settings["trading"]
@@ -192,7 +194,7 @@ def simulate_pair(
                     )
 
                 held_bars = i - int(position["entry_index"]) + 1
-                if held_bars >= max_hold:
+                if held_bars >= max_hold_bars:
                     exit_price = float(candle["close"])
                     reason = "TIME_EXIT"
 
@@ -205,13 +207,13 @@ def simulate_pair(
                 trades.append({
                     "symbol": pair,
                     "entry_ts": int(position["entry_ts"]),
-                    "exit_ts": int(candle["ts"]) + 60,
+                    "exit_ts": int(candle["ts"]) + base_step,
                     "entry": float(position["entry"]),
                     "exit": exit_fill,
                     "reason": reason,
                     "net_pnl_usdt": pnl,
                     "net_pnl_pct": (pnl / net_cost * 100.0) if net_cost else 0.0,
-                    "held_minutes": held_bars if reason == "TIME_EXIT" else i - int(position["entry_index"]) + 1,
+                    "held_minutes": (i - int(position["entry_index"]) + 1) * base_step / 60.0,
                 })
                 position = None
             continue
@@ -223,7 +225,7 @@ def simulate_pair(
         if entry_ts < period_start or entry_ts - last_entry_ts < int(settings.get("signal_cooldown_min", 10)) * 60:
             continue
 
-        # Only use higher-timeframe candles that had fully closed by this 1m close.
+        # Only use higher-timeframe candles that had fully closed by this entry-bar close.
         mi = bisect_right(medium_close_times, candle_close_ts)
         li = bisect_right(long_close_times, candle_close_ts)
         medium_closed = medium[max(0, mi - 220):mi]
@@ -234,7 +236,7 @@ def simulate_pair(
             continue
 
         window = base[max(0, i - int(settings["candle_limit"]) + 1):i + 1]
-        vwap_window = medium[max(0, mi - 300):mi]
+        vwap_window = base[max(0, i - 299):i + 1]
         signal = evaluate_ema_vwap_vol(window, settings, vwap_candles=vwap_window) if settings.get("enable_ema_vwap_vol", True) else {"signal": False}
         if settings.get("enable_momentum", False):
             momentum = evaluate_momentum(window, settings, vwap_candles=vwap_window)
@@ -284,22 +286,22 @@ def simulate_pair(
         trades.append({
             "symbol": pair,
             "entry_ts": int(position["entry_ts"]),
-            "exit_ts": int(last["ts"]) + 60,
+            "exit_ts": int(last["ts"]) + base_step,
             "entry": float(position["entry"]),
             "exit": exit_fill,
             "reason": "END_OF_DATA",
             "net_pnl_usdt": pnl,
             "net_pnl_pct": (pnl / net_cost * 100.0) if net_cost else 0.0,
-            "held_minutes": len(base) - 1 - int(position["entry_index"]),
+            "held_minutes": (len(base) - int(position["entry_index"])) * base_step / 60.0,
         })
 
     training = [trade for trade in trades if trade["entry_ts"] < test_start]
     testing = [trade for trade in trades if trade["entry_ts"] >= test_start]
     return {
         "symbol": pair,
-        "candles_1m": len(base),
-        "candles_5m": len(medium),
-        "candles_15m": len(long),
+        "candles_entry": len(base),
+        "candles_15m": len(medium),
+        "candles_1h": len(long),
         "train": _metrics(training, 1000.0),
         "test": _metrics(testing, 1000.0),
         "trades": trades,
@@ -334,12 +336,14 @@ def main() -> int:
     period_start = now - args.days * 86400
     # Three extra days provide at least 200 completed 15m bars for warm-up.
     # Keep three days of warm-up while staying inside a recent 29-day window.
-    fetch_start = period_start - 3 * 86400
+    fetch_base_start = period_start - 3 * 86400
+    fetch_medium_start = period_start - 3 * 86400
+    fetch_long_start = period_start - 10 * 86400
     test_start = period_start + int(args.days * 86400 * 0.70)
     settings = deepcopy(DEFAULT_SETTINGS)
-    settings["timeframe"] = "1m"
-    settings["long_timeframe"] = "5m"
-    settings["very_long_timeframe"] = "15m"
+    settings["timeframe"] = "5m"
+    settings["long_timeframe"] = "15m"
+    settings["very_long_timeframe"] = "1h"
     settings["use_closed_candles_only"] = False  # every row passed to the simulator is closed
     settings["candle_limit"] = 500
 
@@ -349,10 +353,10 @@ def main() -> int:
     pair_results = []
     session = requests.Session()
     for pair in pairs:
-        print(f"Downloading {pair} 1m/5m/15m candles...", flush=True)
-        base = fetch_history(pair, "1m", fetch_start, now, session)
-        medium = fetch_history(pair, "5m", fetch_start, now, session)
-        long = fetch_history(pair, "15m", fetch_start, now, session)
+        print(f"Downloading {pair} 5m/15m/1h candles...", flush=True)
+        base = fetch_history(pair, "5m", fetch_base_start, now, session)
+        medium = fetch_history(pair, "15m", fetch_medium_start, now, session)
+        long = fetch_history(pair, "1h", fetch_long_start, now, session)
         if not base:
             print(f"SKIP {pair}: no historical candles returned", flush=True)
             continue
@@ -388,12 +392,12 @@ def main() -> int:
     report = {
         "exchange": "Gate.io Spot",
         "data_endpoint": f"{BASE_URL}/spot/candlesticks",
-        "strategy": "1m EMA9/21/200 + daily VWAP + quote-volume surge + Wilder RSI + 5m/15m trend confirmation",
+        "strategy": "5m EMA9/21/200 + daily VWAP + quote-volume surge + Wilder RSI + 15m/1h trend confirmation",
         "period": {"start_utc": utc_text(period_start), "end_utc": utc_text(now), "days": args.days,
                    "out_of_sample_start_utc": utc_text(test_start), "split": "70% train / 30% out-of-sample"},
         "execution_model": {
-            "entry": "next 1m candle open, adverse buy slippage",
-            "exit": "OHLC stop/target; if both touched in one candle, stop first; adverse sell slippage",
+            "entry": "next 5m candle open, adverse buy slippage",
+            "exit": "5m OHLC stop/target; if both touched in one candle, stop first; adverse sell slippage",
             "fee_pct_each_side": args.fee_pct,
             "slippage_bps_each_side": args.slippage_bps,
             "fixed_notional_usdt_per_trade": args.notional,
