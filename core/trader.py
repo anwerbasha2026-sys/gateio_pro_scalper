@@ -165,9 +165,11 @@ class TradeManager:
                 self._log(f"[LIVE BUY ERR {symbol}] {exc}")
                 return None
         else:
-            entry = float(price)
-            if entry <= 0:
+            market_price = float(price)
+            slippage_pct = float(self.cfg.get("slippage_pct", 0.05))
+            if market_price <= 0:
                 return None
+            entry = market_price * (1.0 + slippage_pct / 100.0)
             qty = amount * (1.0 - fee_pct / 100.0) / entry
             invested = amount
             self.paper_balance -= amount
@@ -274,9 +276,11 @@ class TradeManager:
                 return None
             sold_qty = min(sold_qty, position.qty)
         else:
-            actual_exit = float(exit_price)
-            if actual_exit <= 0:
+            market_exit = float(exit_price)
+            slippage_pct = float(self.cfg.get("slippage_pct", 0.05))
+            if market_exit <= 0:
                 return None
+            actual_exit = market_exit * (1.0 - slippage_pct / 100.0)
             sold_qty = position.qty
             proceeds = max(0.0, sold_qty * actual_exit * (1.0 - fee_pct / 100.0))
             self.paper_balance += proceeds
