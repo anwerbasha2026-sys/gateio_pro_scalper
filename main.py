@@ -74,7 +74,9 @@ class GateioScalperMobileApp(App):
         self.trader = TradeManager(self.settings, data_dir=self.user_data_dir, log_cb=self._enqueue_log)
 
         self._stop_event = threading.Event()
+        self._monitor_shutdown = threading.Event()
         self._worker: Optional[threading.Thread] = None
+        self._monitor_worker: Optional[threading.Thread] = None
         self._running = False
         self._manual_closes: "queue.Queue[str]" = queue.Queue()
         self._log_queue: "queue.Queue[str]" = queue.Queue()
@@ -218,8 +220,8 @@ class GateioScalperMobileApp(App):
             ("EMA + Daily VWAP + Vol", self.sw_evv),
             ("Momentum (RSI+EMA+VWAP)", self.sw_mom),
             ("Use EMA 200 Filter", self.sw_ema200),
-            ("Confirm 15m HTF Trend", self.sw_htf),
-            ("Confirm 1h HTF Trend", self.sw_vlong),
+            ("Confirm 5m Trend", self.sw_htf),
+            ("Confirm 15m Trend", self.sw_vlong),
             ("Closed Candles Only", self.sw_closed),
             ("Enable Volume Z-Score", self.sw_z),
             ("Top Coins to Scan", self.in_num_coins),
@@ -393,6 +395,12 @@ class GateioScalperMobileApp(App):
             return False
 
         if cfg["trading"]["mode"] == "live":
+            if not bool(cfg["trading"].get("live_trading_approved", False)):
+                self._show_popup(
+                    "LIVE Trading Locked",
+                    "Live orders remain disabled until the real-data backtest and extended Paper validation pass."
+                )
+                return False
             if not (cfg["gateio_api"]["api_key"] and cfg["gateio_api"]["api_secret"]):
                 self._show_popup("API Keys Needed", "Enter Gate.io API Key & Secret in API/TG tab for LIVE mode.")
                 return False
@@ -428,6 +436,10 @@ class GateioScalperMobileApp(App):
         if self._running or not self._save_and_apply():
             return
         self._stop_event.clear()
+        self._monitor_shutdown.clear()
+        if self._monitor_worker is None or not self._monitor_worker.is_alive():
+            self._monitor_worker = threading.Thread(target=self._monitor_positions_loop, daemon=True)
+            self._monitor_worker.start()
         self._running = True
         self.btn_start.disabled = True
         self.btn_stop.disabled = False
@@ -441,7 +453,7 @@ class GateioScalperMobileApp(App):
         self.btn_start.disabled = False
         self.btn_stop.disabled = True
         self.kpi_status.text = "Status: Stopped"
-        self._enqueue_log("Stopping scanner...")
+        self._enqueue_log("Stopping scanner; open positions will continue to be monitored until closed.")
 
     def _close_all(self) -> None:
         for sym in list(self.trader.positions.keys()):
@@ -460,9 +472,6 @@ class GateioScalperMobileApp(App):
             cycle += 1
             cfg = self.settings
             t0 = time.perf_counter()
-
-            self._drain_manual_closes()
-            self._monitor_positions()
 
             try:
                 pairs = self.api.fetch_top_usdt_pairs(
@@ -494,7 +503,10 @@ class GateioScalperMobileApp(App):
                             )
                             if cfg["trading"].get("auto_trade", True):
                                 live_p = self.api.fetch_last_price(res["symbol"]) or res["price"]
-                                self.trader.open_trade(res["symbol"], live_p, "+".join(res["strategies"]), api=self.api)
+                                self.trader.open_trade(
+                                    res["symbol"], live_p, "+".join(res["strategies"]),
+                                    api=self.api, atr=res.get("atr")
+                                )
 
             dt = time.perf_counter() - t0
             self._enqueue_log(f"[Cycle {cycle}] Scanned {len(pairs)} pairs in {dt:.1f}s | Signals: {signals}")
@@ -514,21 +526,31 @@ class GateioScalperMobileApp(App):
 
     def _monitor_positions(self) -> None:
         for sym in list(self.trader.positions.keys()):
-            if self._stop_event.is_set():
+            position = self.trader.positions.get(sym)
+            if position is None:
+                continue
+            try:
+                price = self.api.fetch_last_price(sym)
+                if price is not None:
+                    self.trader.evaluate_price(sym, price, api=self.api)
+            except Exception as exc:
+                self._enqueue_log(f"[MONITOR ERR {sym}] {exc}")
+
+    def _monitor_positions_loop(self) -> None:
+        while not self._monitor_shutdown.is_set():
+            self._drain_manual_closes()
+            self._monitor_positions()
+            if self._stop_event.is_set() and not self.trader.positions:
                 break
-            p = self.api.fetch_last_price(sym)
-            if p is not None:
-                self.trader.evaluate_price(sym, p, api=self.api)
+            interval = max(2, int(self.settings["trading"].get("monitor_interval_sec", 3)))
+            self._monitor_shutdown.wait(interval)
 
     def _sleep_with_monitor(self, total_sec: int) -> None:
-        mon = max(2, int(self.settings["trading"].get("monitor_interval_sec", 5)))
-        waited = 0
-        while waited < total_sec and not self._stop_event.is_set():
-            time.sleep(1)
-            waited += 1
-            self._drain_manual_closes()
-            if self.trader.positions and waited % mon == 0:
-                self._monitor_positions()
+        self._stop_event.wait(max(0, int(total_sec)))
+
+    def on_stop(self) -> None:
+        self._stop_event.set()
+        self._monitor_shutdown.set()
 
     def _enqueue_log(self, msg: str) -> None:
         ts = datetime.now().strftime("%H:%M:%S")
