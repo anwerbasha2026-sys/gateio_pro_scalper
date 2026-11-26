@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Historical, no-lookahead Gate.io Spot backtest for the 1m scalp strategy.
+"""Historical, no-lookahead Gate.io Spot backtest for the 5m scalp strategy.
 
 Example:
   python backtest.py --days 26 --pairs BTC_USDT,ETH_USDT,SOL_USDT,XRP_USDT
@@ -309,7 +309,7 @@ def simulate_pair(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Gate.io real-candle 1m scalp backtest")
+    parser = argparse.ArgumentParser(description="Gate.io real-candle 5m scalp backtest")
     parser.add_argument("--days", type=int, default=26)
     parser.add_argument("--pairs", default="BTC_USDT,ETH_USDT,SOL_USDT,XRP_USDT")
     parser.add_argument("--fee-pct", type=float, default=0.10, help="Taker fee on each side, percent")
