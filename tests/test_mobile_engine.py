@@ -95,6 +95,13 @@ class TestGateioMobileEngine(unittest.TestCase):
         self.assertEqual(parsed[0]["base_volume"], 500.0)
         self.assertTrue(parsed[0]["window_closed"])
 
+        # Also accept the 7-column public example where column 6 is window_closed.
+        short_row = [["1763942400", "50000", "105.0", "106.0", "100.0", "101.0", "true"]]
+        short_parsed = GateioSpotAPI.parse_candles(short_row)
+        self.assertEqual(len(short_parsed), 1)
+        self.assertEqual(short_parsed[0]["volume"], 50000.0)
+        self.assertTrue(short_parsed[0]["window_closed"])
+
     def test_hmac_sha512_signature(self):
         signature = GateioSpotAPI.build_signature(
             "GET", "/api/v4/spot/accounts", "currency=USDT", "",
@@ -161,6 +168,7 @@ class TestGateioMobileEngine(unittest.TestCase):
             })
             trader = TradeManager(cfg, data_dir=td)
             self.assertIsNotNone(trader.open_trade("BTC_USDT", 100.0, "EMA_VWAP_VOL"))
+            self.assertAlmostEqual(trader.positions["BTC_USDT"].entry_price, 100.0)
             self.assertIsNone(trader.open_trade("ETH_USDT", 200.0, "EMA_VWAP_VOL"))
             self.assertIsNone(trader.evaluate_price("BTC_USDT", 101.5))
             self.assertTrue(trader.positions["BTC_USDT"].trailing_active)
@@ -177,9 +185,11 @@ class TestGateioMobileEngine(unittest.TestCase):
             cfg["trading"]["trailing_stop_enabled"] = False
             cfg["trading"]["break_even_activation_pct"] = 5.0
             cfg["trading"]["max_holding_minutes"] = 15
+            cfg["trading"]["slippage_pct"] = 0.05
             trader = TradeManager(cfg, data_dir=td)
             position = trader.open_trade("BTC_USDT", 100.0, "EMA", atr=1.0)
-            self.assertAlmostEqual(position.take_profit, 101.25)
+            self.assertAlmostEqual(position.entry_price, 100.05)
+            self.assertAlmostEqual(position.take_profit, 101.300625)
             self.assertAlmostEqual(position.stop_loss, 98.4)
             position.opened_ts = 100.0
             record = trader.evaluate_price("BTC_USDT", 100.0, now_ts=100.0 + 901.0)
