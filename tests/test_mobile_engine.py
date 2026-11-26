@@ -140,7 +140,10 @@ class TestGateioMobileEngine(unittest.TestCase):
         cfg["use_closed_candles_only"] = False
         result = evaluate_ema_vwap_vol(candles, cfg)
         self.assertIn("signal", result)
-        # A smooth trend without a fresh EMA cross and volume burst is not bought.
+        self.assertIn("entry_trigger", result)
+        self.assertIn("checks", result)
+        self.assertIn("volume_confirmation", result["checks"])
+        # A smooth trend without a valid volume/candle setup is not bought.
         self.assertFalse(result["signal"])
         momentum = evaluate_momentum(candles, cfg)
         self.assertIn("signal", momentum)
