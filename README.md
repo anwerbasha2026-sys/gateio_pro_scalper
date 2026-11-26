@@ -20,7 +20,7 @@
 ```bash
 pip install -r requirements.txt
 python -m unittest discover -s tests -v
-python backtest.py --days 30 --pairs BTC_USDT,ETH_USDT,SOL_USDT,XRP_USDT --fee-pct 0.10 --slippage-bps 5
+python backtest.py --days 26 --pairs BTC_USDT,ETH_USDT,SOL_USDT,XRP_USDT --fee-pct 0.10 --slippage-bps 5
 ```
 
 يُقسّم الاختبار زمنيًا إلى 70% تدريب و30% خارج العينة. يصدر `backtest-results/backtest_report.json` و`backtest-results/backtest_trades.csv`. معيار النجاح الافتراضي لجزء خارج العينة: 30 صفقة على الأقل، نسبة فوز 60% على الأقل، Profit Factor لا يقل عن 1.05، ربح صافٍ موجب، وتراجع أقصى لا يتجاوز 10%.
