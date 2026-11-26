@@ -107,6 +107,7 @@ def evaluate_ema_vwap_vol(
 def evaluate_momentum(
     candles: List[Dict[str, float]],
     settings: Dict[str, Any],
+    vwap_candles: Optional[List[Dict[str, float]]] = None,
 ) -> Dict[str, Any]:
     if not candles or len(candles) < 202:
         return {"signal": False}
@@ -117,7 +118,8 @@ def evaluate_momentum(
     e21 = ema_series(closes, 21)
     rsi = calculate_rsi(closes, 14)
     atr = calculate_atr(candles, 14)
-    vwap_value = calculate_daily_vwap(candles, closed_only=closed_only)
+    vwap_source = vwap_candles if vwap_candles else candles
+    vwap_value = calculate_daily_vwap(vwap_source, closed_only=closed_only)
     volume = analyze_volume(
         candles,
         period=int(settings.get("volume_period", 20)),
@@ -199,7 +201,7 @@ def scan_symbol(api: Any, pair: str, settings: Dict[str, Any]) -> Optional[Dict[
         medium = api.fetch_candles(pair, interval=settings["long_timeframe"], limit=300)
 
     evv = evaluate_ema_vwap_vol(candles, settings, vwap_candles=vwap_candles) if enable_evv else {"signal": False}
-    momentum = evaluate_momentum(candles, settings) if enable_momentum else {"signal": False}
+    momentum = evaluate_momentum(candles, settings, vwap_candles=vwap_candles) if enable_momentum else {"signal": False}
     strategies = []
 
     if enable_evv and enable_momentum:
