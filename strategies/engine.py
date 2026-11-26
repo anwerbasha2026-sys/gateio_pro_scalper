@@ -192,13 +192,21 @@ def scan_symbol(api: Any, pair: str, settings: Dict[str, Any]) -> Optional[Dict[
         return None
 
     closed_only = bool(settings.get("use_closed_candles_only", True))
-    # Fetch enough 5m bars to include the full current UTC session for VWAP.
+    closed_only = bool(settings.get("use_closed_candles_only", True))
     medium = None
-    if settings.get("use_htf_filter", True) and settings.get("long_timeframe") == "5m":
-        medium = api.fetch_candles(pair, interval="5m", limit=300)
-    vwap_candles = medium or api.fetch_candles(pair, interval="5m", limit=300)
-    if settings.get("use_htf_filter", True) and medium is None:
-        medium = api.fetch_candles(pair, interval=settings["long_timeframe"], limit=300)
+    if settings.get("use_htf_filter", True):
+        if settings.get("long_timeframe") == settings.get("timeframe"):
+            medium = candles
+        else:
+            medium = api.fetch_candles(
+                pair, interval=settings["long_timeframe"], limit=300
+            )
+
+    # Use up to 25 hours of 5m candles for a full UTC-session VWAP.
+    if settings.get("timeframe") == "5m" and len(candles) >= 280:
+        vwap_candles = candles
+    else:
+        vwap_candles = api.fetch_candles(pair, interval="5m", limit=300)
 
     evv = evaluate_ema_vwap_vol(candles, settings, vwap_candles=vwap_candles) if enable_evv else {"signal": False}
     momentum = evaluate_momentum(candles, settings, vwap_candles=vwap_candles) if enable_momentum else {"signal": False}
