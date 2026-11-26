@@ -148,6 +148,15 @@ def simulate_pair(
     medium_close_times = [int(c["ts"]) + medium_step for c in medium]
     long_close_times = [int(c["ts"]) + long_step for c in long]
     trades: List[Dict[str, Any]] = []
+    diagnostics: Dict[str, Any] = {
+        "eligible_bars": 0,
+        "medium_trend_pass": 0,
+        "long_trend_pass": 0,
+        "both_trends_pass": 0,
+        "entry_rule_pass": 0,
+        "complete_setup_pass": 0,
+        "rule_pass_counts": {},
+    }
     position: Optional[Dict[str, Any]] = None
     last_entry_ts = -10**18
     warmup = 205
@@ -225,24 +234,43 @@ def simulate_pair(
         if entry_ts < period_start or entry_ts - last_entry_ts < int(settings.get("signal_cooldown_min", 10)) * 60:
             continue
 
+        diagnostics["eligible_bars"] += 1
         # Only use higher-timeframe candles that had fully closed by this entry-bar close.
         mi = bisect_right(medium_close_times, candle_close_ts)
         li = bisect_right(long_close_times, candle_close_ts)
         medium_closed = medium[max(0, mi - 220):mi]
         long_closed = long[max(0, li - 220):li]
-        if settings.get("use_htf_filter", True) and not check_htf_15m_trend(medium_closed, closed_only=False):
-            continue
-        if settings.get("use_very_long_filter", True) and not check_htf_1h_trend(long_closed, closed_only=False):
-            continue
+        medium_ok = (
+            check_htf_15m_trend(medium_closed, closed_only=False)
+            if settings.get("use_htf_filter", True) else True
+        )
+        long_ok = (
+            check_htf_1h_trend(long_closed, closed_only=False)
+            if settings.get("use_very_long_filter", True) else True
+        )
+        if medium_ok:
+            diagnostics["medium_trend_pass"] += 1
+        if long_ok:
+            diagnostics["long_trend_pass"] += 1
+        if medium_ok and long_ok:
+            diagnostics["both_trends_pass"] += 1
 
         window = base[max(0, i - int(settings["candle_limit"]) + 1):i + 1]
         vwap_window = base[max(0, i - 299):i + 1]
         signal = evaluate_ema_vwap_vol(window, settings, vwap_candles=vwap_window) if settings.get("enable_ema_vwap_vol", True) else {"signal": False}
+        for rule_name, passed_rule in signal.get("checks", {}).items():
+            rule_counts = diagnostics["rule_pass_counts"]
+            rule_counts[rule_name] = rule_counts.get(rule_name, 0) + (1 if passed_rule else 0)
+
+        entry_rules_ok = bool(signal.get("signal"))
         if settings.get("enable_momentum", False):
             momentum = evaluate_momentum(window, settings, vwap_candles=vwap_window)
-            if not (signal.get("signal") and momentum.get("signal")):
-                continue
-        elif not signal.get("signal"):
+            entry_rules_ok = entry_rules_ok and bool(momentum.get("signal"))
+        if entry_rules_ok:
+            diagnostics["entry_rule_pass"] += 1
+        if entry_rules_ok and medium_ok and long_ok:
+            diagnostics["complete_setup_pass"] += 1
+        if not (entry_rules_ok and medium_ok and long_ok):
             continue
 
         atr = float(signal.get("atr") or 0.0)
@@ -305,6 +333,7 @@ def simulate_pair(
         "train": _metrics(training, 1000.0),
         "test": _metrics(testing, 1000.0),
         "trades": trades,
+        "diagnostics": diagnostics,
     }
 
 
@@ -416,6 +445,24 @@ def main() -> int:
         "per_pair": [
             {k: v for k, v in result.items() if k != "trades"} for result in pair_results
         ],
+        "diagnostics": {
+            key: sum(result.get("diagnostics", {}).get(key, 0) for result in pair_results)
+            for key in (
+                "eligible_bars", "medium_trend_pass", "long_trend_pass",
+                "both_trends_pass", "entry_rule_pass", "complete_setup_pass",
+            )
+        },
+        "rule_pass_counts": {
+            rule: sum(
+                result.get("diagnostics", {}).get("rule_pass_counts", {}).get(rule, 0)
+                for result in pair_results
+            )
+            for rule in sorted({
+                rule
+                for result in pair_results
+                for rule in result.get("diagnostics", {}).get("rule_pass_counts", {})
+            })
+        },
         "trades": sorted(all_trades, key=lambda trade: trade["entry_ts"]),
     }
 
